@@ -1076,7 +1076,9 @@ if not st.session_state.nombre_alumna:
             <div class="tile tile-lilac">
               <div class="emoji">🎬 &nbsp; 💡 &nbsp; 🎭</div>
               <div class="big">Tu historia empieza aquí</div>
-              <div class="label">{len(QUESTIONS)} preguntas · retos aleatorios · marcos para desbloquear</div>
+              <div class="label">"""
+            + str(len(QUESTIONS))
+            + """ preguntas · retos aleatorios · marcos para desbloquear</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1087,11 +1089,6 @@ if not st.session_state.nombre_alumna:
             if DB_COMPARTIDA is None:
                 if ERROR_FIRESTORE:
                     st.error(f"No se pudo conectar al ranking compartido: {ERROR_FIRESTORE}")
-                else:
-                    st.warning(
-                        "El ranking compartido todavía no está conectado. "
-                        "Puedes probar la app en modo local; tu avance no se sincronizará."
-                    )
                 with st.form("formulario_apodo_local"):
                     apodo_local = st.text_input(
                         "Tu apodo",
@@ -1115,33 +1112,6 @@ if not st.session_state.nombre_alumna:
                             compartido=False,
                         )
                         st.rerun()
-                with st.expander("¿Cómo activo las cuentas y el ranking compartidos?"):
-                    st.markdown(
-                        """
-                        1. Crea un proyecto gratuito en [Firebase Console](https://console.firebase.google.com/).
-                        2. Crea una base **Cloud Firestore** en modo producción.
-                        3. En Configuración del proyecto → Cuentas de servicio, genera una clave privada.
-                        4. No compartas esa clave ni la subas a GitHub. Crea `.streamlit/secrets.toml`
-                           junto a `tareascolar.py` y pega sus campos con el formato indicado al final.
-                        5. Ejecuta de nuevo la app. Las cuentas usarán apodo y PIN; el ranking solo
-                           mostrará apodos y puntos.
-                        """
-                    )
-                    st.code(
-                        '[firebase_service_account]\n'
-                        'type = "service_account"\n'
-                        'project_id = "ID_DE_TU_PROYECTO"\n'
-                        'private_key_id = "ID_DE_LA_CLAVE"\n'
-                        'private_key = """-----BEGIN PRIVATE KEY-----\\nPEGA_AQUI_LA_CLAVE\\n-----END PRIVATE KEY-----\\n"""\n'
-                        'client_email = "CUENTA_DE_SERVICIO"\n'
-                        'client_id = "ID_DE_CLIENTE"\n'
-                        'auth_uri = "https://accounts.google.com/o/oauth2/auth"\n'
-                        'token_uri = "https://oauth2.googleapis.com/token"\n'
-                        'auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"\n'
-                        'client_x509_cert_url = "URL_DEL_CERTIFICADO"\n'
-                        'universe_domain = "googleapis.com"',
-                        language="toml",
-                    )
             else:
                 registro_tab, ingreso_tab = st.tabs(["Crear cuenta", "Ya tengo cuenta"])
                 with registro_tab:
@@ -1595,18 +1565,6 @@ elif st.session_state.pagina == "Mi progreso":
         )
         if ERROR_FIRESTORE:
             st.error(f"No se pudo conectar con Firestore: {ERROR_FIRESTORE}")
-        with st.expander("Activar ranking compartido"):
-            st.markdown(
-                """
-                1. Crea un proyecto en [Firebase Console](https://console.firebase.google.com/).
-                2. Activa **Cloud Firestore**.
-                3. En Configuración del proyecto → Cuentas de servicio, genera una clave privada.
-                4. Guarda esa clave localmente en `.streamlit/secrets.toml`; **no la envíes a nadie
-                   ni la publiques en GitHub**.
-                5. Al compartir la app en Streamlit Community Cloud, pega esos mismos valores en
-                   **App settings → Secrets**. Las alumnas entrarán con apodo y PIN.
-                """
-            )
     else:
         try:
             ranking, alumnas_total, aciertos_del_curso = crear_ranking(DB_COMPARTIDA)
