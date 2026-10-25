@@ -1,5 +1,7 @@
 from html import escape
+import glob
 import hashlib
+import os
 import hmac
 from io import BytesIO
 import re
@@ -151,7 +153,7 @@ st.markdown(
 )
 
 
-PREGUNTAS = [
+QUESTIONS = [
     {
         "question": "¿Qué es un guion teatral?",
         "options": [
@@ -694,11 +696,74 @@ PREGUNTAS = [
     },
 ]
 
-# The question bank progresses from basic recognition to production and interpretation concepts.
+def load_questions():
+    app_directory = os.path.dirname(os.path.abspath(__file__))
+    question_files = [
+        file_path
+        for file_path in glob.glob(os.path.join(app_directory, "*.txt"))
+        if os.path.basename(file_path).lower() != "requirements.txt"
+    ]
+    if len(question_files) != 1:
+        raise FileNotFoundError(
+            "Coloca el archivo TXT de preguntas en la misma carpeta que tareascolar.py."
+        )
+
+    with open(question_files[0], encoding="utf-8-sig") as question_file:
+        content = question_file.read()
+    matches = list(re.finditer(r"(?m)^(\d+)\.\s*(.+?)\s*$", content))
+    questions = []
+    seen_numbers = set()
+
+    for index, question_match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
+        block = content[question_match.end():end]
+        options = dict(re.findall(r"(?m)^([A-D])\)\s*(.+?)\s*$", block))
+        answer_match = re.search(r"(?m)^Respuesta correcta:\s*([A-D])\s*$", block)
+        number = int(question_match.group(1))
+        if number in seen_numbers or set(options) != set("ABCD") or len(set(options.values())) != 4:
+            raise ValueError(f"La pregunta {number} del archivo está incompleta o repetida.")
+        if answer_match is None:
+            raise ValueError(f"Falta la respuesta correcta de la pregunta {number}.")
+
+        correct_answer = options[answer_match.group(1)]
+        questions.append(
+            {
+                "number": number,
+                "question": question_match.group(2),
+                "options": [options[letter] for letter in "ABCD"],
+                "answer": correct_answer,
+                "explanation": f"La respuesta correcta indicada en el material es: {correct_answer}",
+            }
+        )
+        seen_numbers.add(number)
+
+    if not questions:
+        raise ValueError("No se encontraron preguntas en el archivo de texto.")
+
+    return sorted(questions, key=lambda question: question["number"])
+
+def mezclar_opciones(preguntas):
+    posiciones_correctas = sample(
+        [indice % 4 for indice in range(len(preguntas))],
+        len(preguntas),
+    )
+    preguntas_mezcladas = []
+    for pregunta, posicion_correcta in zip(preguntas, posiciones_correctas):
+        distractores = [
+            opcion for opcion in pregunta["options"] if opcion != pregunta["answer"]
+        ]
+        opciones = sample(distractores, len(distractores))
+        opciones.insert(posicion_correcta, pregunta["answer"])
+        preguntas_mezcladas.append({**pregunta, "options": opciones})
+    return preguntas_mezcladas
+
+
+QUESTIONS = load_questions()
+
 DIFICULTAD_INDICES = {
-    "Fácil": range(0, 17),
-    "Normal": range(17, 34),
-    "Difícil": range(34, len(PREGUNTAS)),
+    "Fácil": range(0, len(QUESTIONS) // 3),
+    "Normal": range(len(QUESTIONS) // 3, 2 * len(QUESTIONS) // 3),
+    "Difícil": range(2 * len(QUESTIONS) // 3, len(QUESTIONS)),
 }
 
 RANGOS = [
@@ -1011,7 +1076,7 @@ if not st.session_state.nombre_alumna:
             <div class="tile tile-lilac">
               <div class="emoji">🎬 &nbsp; 💡 &nbsp; 🎭</div>
               <div class="big">Tu historia empieza aquí</div>
-              <div class="label">50 preguntas · retos aleatorios · marcos para desbloquear</div>
+              <div class="label">{len(QUESTIONS)} preguntas · retos aleatorios · marcos para desbloquear</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1242,7 +1307,7 @@ if st.session_state.pagina == "Inicio":
         with st.container(border=True):
             st.markdown('<div class="section-eyebrow">Listo para jugar</div>', unsafe_allow_html=True)
             st.markdown("### ¿Practicamos un poco? 🎬")
-            st.write("Hay 50 preguntas mezcladas y tres dificultades para elegir.")
+            st.write(f"Hay {len(QUESTIONS)} preguntas mezcladas y tres dificultades para elegir.")
             if st.button("Ir a Aprender ➜", type="primary", use_container_width=True):
                 st.session_state.pagina = "Aprender"
                 st.rerun()
@@ -1264,16 +1329,16 @@ elif st.session_state.pagina == "Aprender":
                     "Fácil": "🌱 Fácil · conceptos básicos",
                     "Normal": "🎭 Normal · comprensión y aplicación",
                     "Difícil": "🔥 Difícil · análisis teatral",
-                    "Mixto": "🎲 Mixto · las 50 preguntas",
+                    "Mixto": f"🎲 Mixto · las {len(QUESTIONS)} preguntas",
                 }[nivel],
                 key="selector_dificultad",
             )
             if dificultad == "Mixto":
-                pool = list(PREGUNTAS)
+                pool = list(QUESTIONS)
             else:
                 pool = [
                     pregunta
-                    for indice, pregunta in enumerate(PREGUNTAS)
+                    for indice, pregunta in enumerate(QUESTIONS)
                     if indice in DIFICULTAD_INDICES[dificultad]
                 ]
             cantidades = sorted({5, min(10, len(pool)), min(15, len(pool)), len(pool)})
@@ -1289,10 +1354,7 @@ elif st.session_state.pagina == "Aprender":
             st.caption("Cada acierto suma 1 punto ganado y 1 punto disponible para canjear marcos.")
             if st.button("Comenzar ronda 🎬", type="primary", use_container_width=True):
                 ronda_aleatoria = sample(pool, cantidad)
-                st.session_state.preguntas_ronda = [
-                    {**pregunta, "options": sample(pregunta["options"], len(pregunta["options"]))}
-                    for pregunta in ronda_aleatoria
-                ]
+                st.session_state.preguntas_ronda = mezclar_opciones(ronda_aleatoria)
                 st.session_state.nivel_dificultad = dificultad
                 st.session_state.quiz_activo = True
                 st.session_state.quiz_terminado = False
