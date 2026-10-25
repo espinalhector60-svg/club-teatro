@@ -1,5 +1,7 @@
 from html import escape
+import glob
 import hashlib
+import os
 import hmac
 from io import BytesIO
 import re
@@ -9,7 +11,7 @@ import time
 from pathlib import Path
 
 import streamlit as st
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 from firebase_admin import credentials, firestore, get_app, initialize_app
 from firebase_admin.exceptions import FirebaseError
 from google.api_core.exceptions import AlreadyExists, GoogleAPICallError
@@ -33,29 +35,30 @@ st.markdown(
     [data-testid="stHeader"] { background: transparent; }
     [data-testid="stMainBlockContainer"] {
         max-width: 1500px;
-        padding: 1.25rem 2rem 2rem;
+        padding: 1.5rem 2.25rem 2.25rem;
         background: #fff;
-        border: 5px solid #eeedf3;
-        border-radius: 34px;
-        margin: 1rem auto 2rem;
-        box-shadow: 0 20px 60px #4035541c;
+        border: 1px solid #eeedf3;
+        border-radius: 30px;
+        margin: 1.25rem auto 2rem;
+        box-shadow: 0 24px 70px #40355424;
     }
     h1, h2, h3, h4 { font-family: 'Nunito', sans-serif; color: var(--ink); letter-spacing: -.03em; }
     h1 { font-size: 2rem !important; }
+    [data-testid="stCaptionContainer"] { color: #625d68; }
     [data-testid="stMetric"] {
         background: #fff;
         padding: 1rem 1.1rem;
-        border: 1px solid #f0edf4;
+        border: 1px solid #e9e3f2;
         border-radius: 20px;
-        box-shadow: 0 7px 22px #4e42610a;
+        box-shadow: 0 8px 24px #4e426110;
     }
     [data-testid="stMetricLabel"] { color: #777280; }
     [data-testid="stMetricValue"] { color: var(--ink); font-family: 'Nunito', sans-serif; }
     [data-testid="stVerticalBlockBorderWrapper"] {
-        border-color: #eeeaf3 !important;
+        border-color: #e9e3f2 !important;
         border-radius: 23px !important;
         background: #fff;
-        box-shadow: 0 8px 25px #4e42610a;
+        box-shadow: 0 8px 25px #4e42610e;
     }
     [data-testid="stProgressBar"] > div > div { background: linear-gradient(90deg, #7964c9, #f567b7); }
     .brand-mark {
@@ -70,7 +73,7 @@ st.markdown(
         margin-bottom: 1rem;
     }
     .welcome-card p { color: #716278; margin: .25rem 0 0; }
-    .tile { padding: 1.05rem 1.1rem; border-radius: 22px; min-height: 132px; }
+    .tile { padding: 1.2rem 1.25rem; border-radius: 22px; min-height: 132px; }
     .tile .emoji { font-size: 1.3rem; }
     .tile .big { font: 900 2rem 'Nunito', sans-serif; margin-top: .35rem; }
     .tile .label { font-size: .84rem; color: #4b4651; }
@@ -92,6 +95,12 @@ st.markdown(
         background: linear-gradient(100deg, #7964c9, #e35daa) !important;
         color: #fff !important;
     }
+    div[data-testid="stButton"] > button[data-testid="stBaseButton-primary"] {
+        background: linear-gradient(100deg, #7059bd, #d94f9f) !important;
+        border: 0 !important;
+        color: #fff !important;
+        font-weight: 800;
+    }
     [data-testid="stRadio"] label {
         display: flex; align-items: center; min-height: 2.75rem;
         background: #faf8fc; border: 1px solid #eeeaf3; padding: .45rem .65rem;
@@ -109,6 +118,30 @@ st.markdown(
     [data-testid="stTextInput"] input::placeholder {
         color: #8a8490 !important; -webkit-text-fill-color: #8a8490 !important; opacity: 1;
     }
+    [data-testid="stTextInput"] label,
+    [data-testid="stTextInput"] label p,
+    [data-testid="stFileUploader"] label,
+    [data-testid="stFileUploader"] label p {
+        color: #393442 !important;
+        opacity: 1 !important;
+        font-weight: 700;
+    }
+    [data-testid="stAlert"] p,
+    [data-testid="stAlert"] span,
+    [data-testid="stAlert"] [data-testid="stMarkdownContainer"] {
+        color: #332d3a !important;
+        opacity: 1 !important;
+    }
+    [data-testid="stAlert"] {
+        border: 1px solid #eadca0;
+        border-radius: 15px;
+        box-shadow: 0 5px 16px #4e42610a;
+    }
+    [data-testid="stExpander"] {
+        border: 1px solid #eeeaf3;
+        border-radius: 16px;
+        background: #fff;
+    }
     @media (max-width: 760px) {
         [data-testid="stMainBlockContainer"] { padding: .8rem; border-width: 3px; border-radius: 22px; margin: .4rem; }
     }
@@ -120,7 +153,7 @@ st.markdown(
 )
 
 
-PREGUNTAS = [
+QUESTIONS = [
     {
         "question": "¿Qué es un guion teatral?",
         "options": [
@@ -663,11 +696,74 @@ PREGUNTAS = [
     },
 ]
 
-# The question bank progresses from basic recognition to production and interpretation concepts.
+def load_questions():
+    app_directory = os.path.dirname(os.path.abspath(__file__))
+    question_files = [
+        file_path
+        for file_path in glob.glob(os.path.join(app_directory, "*.txt"))
+        if os.path.basename(file_path).lower() != "requirements.txt"
+    ]
+    if len(question_files) != 1:
+        raise FileNotFoundError(
+            "Coloca el archivo TXT de preguntas en la misma carpeta que tareascolar.py."
+        )
+
+    with open(question_files[0], encoding="utf-8-sig") as question_file:
+        content = question_file.read()
+    matches = list(re.finditer(r"(?m)^(\d+)\.\s*(.+?)\s*$", content))
+    questions = []
+    seen_numbers = set()
+
+    for index, question_match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
+        block = content[question_match.end():end]
+        options = dict(re.findall(r"(?m)^([A-D])\)\s*(.+?)\s*$", block))
+        answer_match = re.search(r"(?m)^Respuesta correcta:\s*([A-D])\s*$", block)
+        number = int(question_match.group(1))
+        if number in seen_numbers or set(options) != set("ABCD") or len(set(options.values())) != 4:
+            raise ValueError(f"La pregunta {number} del archivo está incompleta o repetida.")
+        if answer_match is None:
+            raise ValueError(f"Falta la respuesta correcta de la pregunta {number}.")
+
+        correct_answer = options[answer_match.group(1)]
+        questions.append(
+            {
+                "number": number,
+                "question": question_match.group(2),
+                "options": [options[letter] for letter in "ABCD"],
+                "answer": correct_answer,
+                "explanation": f"La respuesta correcta indicada en el material es: {correct_answer}",
+            }
+        )
+        seen_numbers.add(number)
+
+    if not questions:
+        raise ValueError("No se encontraron preguntas en el archivo de texto.")
+
+    return sorted(questions, key=lambda question: question["number"])
+
+def mezclar_opciones(preguntas):
+    posiciones_correctas = sample(
+        [indice % 4 for indice in range(len(preguntas))],
+        len(preguntas),
+    )
+    preguntas_mezcladas = []
+    for pregunta, posicion_correcta in zip(preguntas, posiciones_correctas):
+        distractores = [
+            opcion for opcion in pregunta["options"] if opcion != pregunta["answer"]
+        ]
+        opciones = sample(distractores, len(distractores))
+        opciones.insert(posicion_correcta, pregunta["answer"])
+        preguntas_mezcladas.append({**pregunta, "options": opciones})
+    return preguntas_mezcladas
+
+
+QUESTIONS = load_questions()
+
 DIFICULTAD_INDICES = {
-    "Fácil": range(0, 17),
-    "Normal": range(17, 34),
-    "Difícil": range(34, len(PREGUNTAS)),
+    "Fácil": range(0, len(QUESTIONS) // 3),
+    "Normal": range(len(QUESTIONS) // 3, 2 * len(QUESTIONS) // 3),
+    "Difícil": range(2 * len(QUESTIONS) // 3, len(QUESTIONS)),
 }
 
 RANGOS = [
@@ -705,15 +801,29 @@ def obtener_rango(puntos):
 
 def crear_foto_con_marco(foto_bytes, marco):
     ruta_marco = Path(__file__).parent / "assets" / "marcos" / f"{marco['archivo']}.png"
-    imagen_marco = Image.open(ruta_marco).convert("RGB")
-    abertura = (39, 99, 171, 268)
+    escala = 3
+    imagen_marco = Image.open(ruta_marco).convert("RGBA")
+    imagen_marco = imagen_marco.resize(
+        (imagen_marco.width * escala, imagen_marco.height * escala),
+        Image.Resampling.LANCZOS,
+    )
+    imagen_marco = imagen_marco.filter(
+        ImageFilter.UnsharpMask(radius=2.2, percent=145, threshold=3)
+    )
+    abertura = tuple(coordenada * escala for coordenada in (39, 99, 171, 268))
     ancho = abertura[2] - abertura[0]
     alto = abertura[3] - abertura[1]
     if foto_bytes is None:
-        recorte = Image.new("RGB", (ancho, alto), "#f5eafa")
+        recorte = Image.new("RGBA", (ancho, alto), "#f5eafa")
         silueta = ImageDraw.Draw(recorte)
-        silueta.ellipse((34, 10, ancho - 34, 94), fill="#f3c5a8")
-        silueta.ellipse((12, 90, ancho - 12, alto + 32), fill=marco["color"])
+        silueta.ellipse(
+            (34 * escala, 10 * escala, ancho - 34 * escala, 94 * escala),
+            fill="#f3c5a8",
+        )
+        silueta.ellipse(
+            (12 * escala, 90 * escala, ancho - 12 * escala, alto + 32 * escala),
+            fill=marco["color"],
+        )
     else:
         try:
             foto = Image.open(BytesIO(foto_bytes)).convert("RGB")
@@ -722,13 +832,14 @@ def crear_foto_con_marco(foto_bytes, marco):
                 "No se pudo leer la imagen. Elige un archivo JPG, PNG o WEBP válido."
             ) from error
         recorte = ImageOps.fit(foto, (ancho, alto), method=Image.Resampling.LANCZOS)
+
     mascara = Image.new("L", (ancho, alto), 0)
     ImageDraw.Draw(mascara).rounded_rectangle(
         (0, 0, ancho - 1, alto - 1),
-        radius=15,
+        radius=15 * escala,
         fill=255,
     )
-    imagen_marco.paste(recorte, (abertura[0], abertura[1]), mascara)
+    imagen_marco.paste(recorte.convert("RGBA"), (abertura[0], abertura[1]), mascara)
     return imagen_marco
 
 
@@ -965,7 +1076,7 @@ if not st.session_state.nombre_alumna:
             <div class="tile tile-lilac">
               <div class="emoji">🎬 &nbsp; 💡 &nbsp; 🎭</div>
               <div class="big">Tu historia empieza aquí</div>
-              <div class="label">50 preguntas · retos aleatorios · marcos para desbloquear</div>
+              <div class="label">{len(QUESTIONS)} preguntas · retos aleatorios · marcos para desbloquear</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1196,7 +1307,7 @@ if st.session_state.pagina == "Inicio":
         with st.container(border=True):
             st.markdown('<div class="section-eyebrow">Listo para jugar</div>', unsafe_allow_html=True)
             st.markdown("### ¿Practicamos un poco? 🎬")
-            st.write("Hay 50 preguntas mezcladas y tres dificultades para elegir.")
+            st.write(f"Hay {len(QUESTIONS)} preguntas mezcladas y tres dificultades para elegir.")
             if st.button("Ir a Aprender ➜", type="primary", use_container_width=True):
                 st.session_state.pagina = "Aprender"
                 st.rerun()
@@ -1218,16 +1329,16 @@ elif st.session_state.pagina == "Aprender":
                     "Fácil": "🌱 Fácil · conceptos básicos",
                     "Normal": "🎭 Normal · comprensión y aplicación",
                     "Difícil": "🔥 Difícil · análisis teatral",
-                    "Mixto": "🎲 Mixto · las 50 preguntas",
+                    "Mixto": f"🎲 Mixto · las {len(QUESTIONS)} preguntas",
                 }[nivel],
                 key="selector_dificultad",
             )
             if dificultad == "Mixto":
-                pool = list(PREGUNTAS)
+                pool = list(QUESTIONS)
             else:
                 pool = [
                     pregunta
-                    for indice, pregunta in enumerate(PREGUNTAS)
+                    for indice, pregunta in enumerate(QUESTIONS)
                     if indice in DIFICULTAD_INDICES[dificultad]
                 ]
             cantidades = sorted({5, min(10, len(pool)), min(15, len(pool)), len(pool)})
@@ -1243,10 +1354,7 @@ elif st.session_state.pagina == "Aprender":
             st.caption("Cada acierto suma 1 punto ganado y 1 punto disponible para canjear marcos.")
             if st.button("Comenzar ronda 🎬", type="primary", use_container_width=True):
                 ronda_aleatoria = sample(pool, cantidad)
-                st.session_state.preguntas_ronda = [
-                    {**pregunta, "options": sample(pregunta["options"], len(pregunta["options"]))}
-                    for pregunta in ronda_aleatoria
-                ]
+                st.session_state.preguntas_ronda = mezclar_opciones(ronda_aleatoria)
                 st.session_state.nivel_dificultad = dificultad
                 st.session_state.quiz_activo = True
                 st.session_state.quiz_terminado = False
@@ -1407,7 +1515,7 @@ elif st.session_state.pagina == "Mi progreso":
     for indice, marco in enumerate(MARCOS):
         with columnas_marcos[indice % 4]:
             with st.container(border=True):
-                st.image(crear_foto_con_marco(st.session_state.foto_perfil, marco), width=130)
+                st.image(crear_foto_con_marco(st.session_state.foto_perfil, marco), width=175)
                 st.markdown(
                     f'<div class="frame-label">{marco["nombre"]} · {marco["detalle"]}</div>',
                     unsafe_allow_html=True,
