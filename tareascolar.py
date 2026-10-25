@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 import streamlit as st
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 from firebase_admin import credentials, firestore, get_app, initialize_app
 from firebase_admin.exceptions import FirebaseError
 from google.api_core.exceptions import AlreadyExists, GoogleAPICallError
@@ -33,29 +33,30 @@ st.markdown(
     [data-testid="stHeader"] { background: transparent; }
     [data-testid="stMainBlockContainer"] {
         max-width: 1500px;
-        padding: 1.25rem 2rem 2rem;
+        padding: 1.5rem 2.25rem 2.25rem;
         background: #fff;
-        border: 5px solid #eeedf3;
-        border-radius: 34px;
-        margin: 1rem auto 2rem;
-        box-shadow: 0 20px 60px #4035541c;
+        border: 1px solid #eeedf3;
+        border-radius: 30px;
+        margin: 1.25rem auto 2rem;
+        box-shadow: 0 24px 70px #40355424;
     }
     h1, h2, h3, h4 { font-family: 'Nunito', sans-serif; color: var(--ink); letter-spacing: -.03em; }
     h1 { font-size: 2rem !important; }
+    [data-testid="stCaptionContainer"] { color: #625d68; }
     [data-testid="stMetric"] {
         background: #fff;
         padding: 1rem 1.1rem;
-        border: 1px solid #f0edf4;
+        border: 1px solid #e9e3f2;
         border-radius: 20px;
-        box-shadow: 0 7px 22px #4e42610a;
+        box-shadow: 0 8px 24px #4e426110;
     }
     [data-testid="stMetricLabel"] { color: #777280; }
     [data-testid="stMetricValue"] { color: var(--ink); font-family: 'Nunito', sans-serif; }
     [data-testid="stVerticalBlockBorderWrapper"] {
-        border-color: #eeeaf3 !important;
+        border-color: #e9e3f2 !important;
         border-radius: 23px !important;
         background: #fff;
-        box-shadow: 0 8px 25px #4e42610a;
+        box-shadow: 0 8px 25px #4e42610e;
     }
     [data-testid="stProgressBar"] > div > div { background: linear-gradient(90deg, #7964c9, #f567b7); }
     .brand-mark {
@@ -70,7 +71,7 @@ st.markdown(
         margin-bottom: 1rem;
     }
     .welcome-card p { color: #716278; margin: .25rem 0 0; }
-    .tile { padding: 1.05rem 1.1rem; border-radius: 22px; min-height: 132px; }
+    .tile { padding: 1.2rem 1.25rem; border-radius: 22px; min-height: 132px; }
     .tile .emoji { font-size: 1.3rem; }
     .tile .big { font: 900 2rem 'Nunito', sans-serif; margin-top: .35rem; }
     .tile .label { font-size: .84rem; color: #4b4651; }
@@ -92,6 +93,12 @@ st.markdown(
         background: linear-gradient(100deg, #7964c9, #e35daa) !important;
         color: #fff !important;
     }
+    div[data-testid="stButton"] > button[data-testid="stBaseButton-primary"] {
+        background: linear-gradient(100deg, #7059bd, #d94f9f) !important;
+        border: 0 !important;
+        color: #fff !important;
+        font-weight: 800;
+    }
     [data-testid="stRadio"] label {
         display: flex; align-items: center; min-height: 2.75rem;
         background: #faf8fc; border: 1px solid #eeeaf3; padding: .45rem .65rem;
@@ -108,6 +115,30 @@ st.markdown(
     }
     [data-testid="stTextInput"] input::placeholder {
         color: #8a8490 !important; -webkit-text-fill-color: #8a8490 !important; opacity: 1;
+    }
+    [data-testid="stTextInput"] label,
+    [data-testid="stTextInput"] label p,
+    [data-testid="stFileUploader"] label,
+    [data-testid="stFileUploader"] label p {
+        color: #393442 !important;
+        opacity: 1 !important;
+        font-weight: 700;
+    }
+    [data-testid="stAlert"] p,
+    [data-testid="stAlert"] span,
+    [data-testid="stAlert"] [data-testid="stMarkdownContainer"] {
+        color: #332d3a !important;
+        opacity: 1 !important;
+    }
+    [data-testid="stAlert"] {
+        border: 1px solid #eadca0;
+        border-radius: 15px;
+        box-shadow: 0 5px 16px #4e42610a;
+    }
+    [data-testid="stExpander"] {
+        border: 1px solid #eeeaf3;
+        border-radius: 16px;
+        background: #fff;
     }
     @media (max-width: 760px) {
         [data-testid="stMainBlockContainer"] { padding: .8rem; border-width: 3px; border-radius: 22px; margin: .4rem; }
@@ -705,15 +736,29 @@ def obtener_rango(puntos):
 
 def crear_foto_con_marco(foto_bytes, marco):
     ruta_marco = Path(__file__).parent / "assets" / "marcos" / f"{marco['archivo']}.png"
-    imagen_marco = Image.open(ruta_marco).convert("RGB")
-    abertura = (39, 99, 171, 268)
+    escala = 3
+    imagen_marco = Image.open(ruta_marco).convert("RGBA")
+    imagen_marco = imagen_marco.resize(
+        (imagen_marco.width * escala, imagen_marco.height * escala),
+        Image.Resampling.LANCZOS,
+    )
+    imagen_marco = imagen_marco.filter(
+        ImageFilter.UnsharpMask(radius=2.2, percent=145, threshold=3)
+    )
+    abertura = tuple(coordenada * escala for coordenada in (39, 99, 171, 268))
     ancho = abertura[2] - abertura[0]
     alto = abertura[3] - abertura[1]
     if foto_bytes is None:
-        recorte = Image.new("RGB", (ancho, alto), "#f5eafa")
+        recorte = Image.new("RGBA", (ancho, alto), "#f5eafa")
         silueta = ImageDraw.Draw(recorte)
-        silueta.ellipse((34, 10, ancho - 34, 94), fill="#f3c5a8")
-        silueta.ellipse((12, 90, ancho - 12, alto + 32), fill=marco["color"])
+        silueta.ellipse(
+            (34 * escala, 10 * escala, ancho - 34 * escala, 94 * escala),
+            fill="#f3c5a8",
+        )
+        silueta.ellipse(
+            (12 * escala, 90 * escala, ancho - 12 * escala, alto + 32 * escala),
+            fill=marco["color"],
+        )
     else:
         try:
             foto = Image.open(BytesIO(foto_bytes)).convert("RGB")
@@ -722,13 +767,14 @@ def crear_foto_con_marco(foto_bytes, marco):
                 "No se pudo leer la imagen. Elige un archivo JPG, PNG o WEBP válido."
             ) from error
         recorte = ImageOps.fit(foto, (ancho, alto), method=Image.Resampling.LANCZOS)
+
     mascara = Image.new("L", (ancho, alto), 0)
     ImageDraw.Draw(mascara).rounded_rectangle(
         (0, 0, ancho - 1, alto - 1),
-        radius=15,
+        radius=15 * escala,
         fill=255,
     )
-    imagen_marco.paste(recorte, (abertura[0], abertura[1]), mascara)
+    imagen_marco.paste(recorte.convert("RGBA"), (abertura[0], abertura[1]), mascara)
     return imagen_marco
 
 
@@ -1407,7 +1453,7 @@ elif st.session_state.pagina == "Mi progreso":
     for indice, marco in enumerate(MARCOS):
         with columnas_marcos[indice % 4]:
             with st.container(border=True):
-                st.image(crear_foto_con_marco(st.session_state.foto_perfil, marco), width=130)
+                st.image(crear_foto_con_marco(st.session_state.foto_perfil, marco), width=175)
                 st.markdown(
                     f'<div class="frame-label">{marco["nombre"]} · {marco["detalle"]}</div>',
                     unsafe_allow_html=True,
