@@ -1437,8 +1437,10 @@ elif st.session_state.pagina == "Mi progreso":
                     except (OSError, ValueError):
                         st.error("No se pudo abrir esa imagen. Prueba con un JPG, PNG o WEBP válido.")
                     else:
-                        st.session_state.foto_perfil = contenido_foto
-                        st.success("Foto actualizada para esta sesión.")
+                        if contenido_foto != st.session_state.foto_perfil:
+                            st.session_state.foto_perfil = contenido_foto
+                            st.toast("Foto actualizada en tu marco.", icon="🖼️")
+                            st.rerun()
         with st.container(border=True):
             st.markdown("### Cambiar apodo")
             with st.form("form_cambiar_apodo"):
